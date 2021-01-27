@@ -5,15 +5,11 @@ import com.spike.kafkaexp.domain.MessageB;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
-import org.springframework.util.concurrent.SuccessCallback;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.MonoSink;
 
 import java.util.function.Function;
 
@@ -37,25 +33,17 @@ public class MyController {
 
   @PostMapping("/message-b")
   public Mono<String> publishMessageB(@RequestBody Mono<String> input) {
-    return input.flatMap(
-        processContent(content -> MessageB.builder().content(content).build()));
+    return input.flatMap(processContent(content -> MessageB.builder().content(content).build()));
   }
 
   private Function<String, ? extends Mono<? extends String>> processContent(
       Function<String, ? extends Object> payloadCreator) {
     return content ->
-        Mono.create(
-            sink ->
-                kafkaTemplate
-                    .send(backgroundTasksTopic.name(), payloadCreator.apply(content))
-                    .addCallback(successHandler(sink), sink::error));
-  }
-
-  private SuccessCallback<SendResult<String, Object>> successHandler(MonoSink<String> sink) {
-    return result -> {
-      String msg = "Sent msg " + result;
-      log.info(msg);
-      sink.success(msg);
-    };
+            Mono.fromFuture(
+                    kafkaTemplate
+                            .send(backgroundTasksTopic.name(), payloadCreator.apply(content))
+                            .completable())
+                    .map(result -> "Sent msg " + result)
+                    .doOnNext(log::info);
   }
 }
